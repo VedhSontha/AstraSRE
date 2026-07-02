@@ -1,0 +1,208 @@
+version: "3.9"
+
+# ── Shared environment ─────────────────────────────────────────────────────
+x-service-env: &service-env
+  LOKI_URL:           http://loki:3100
+  OTLP_ENDPOINT:      http://jaeger:4318/v1/traces
+  PAYMENT_URL:        http://payment:5002
+  ORDER_URL:          http://order:5001
+  INVENTORY_URL:      http://inventory:5003
+  FRONTEND_URL:       http://frontend:5000
+  NOTIFICATION_URL:   http://notification:5004
+  PROMETHEUS_URL:     http://prometheus:9090
+  DATABASE_URL:       postgresql://astrasre:astrasre123@postgres:5432/astrasre
+  REDIS_URL:          redis://redis:6379/0
+
+services:
+
+  # ── Databases ──────────────────────────────────────────────────────────
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB:       astrasre
+      POSTGRES_USER:     astrasre
+      POSTGRES_PASSWORD: astrasre123
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U astrasre -d astrasre"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    networks: [astrasre]
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    command: >
+      redis-server
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --save ""
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+    networks: [astrasre]
+
+  # ── Microservices ──────────────────────────────────────────────────────
+
+  payment:
+    build: .
+    command: python services/payment.py
+    ports:
+      - "5002:5002"
+      - "8000:8000"
+    environment:
+      <<: *service-env
+    depends_on:
+      postgres: { condition: service_healthy }
+    restart: unless-stopped
+    networks: [astrasre]
+
+  order:
+    build: .
+    command: python services/order.py
+    ports:
+      - "5001:5001"
+      - "8001:8001"
+    environment:
+      <<: *service-env
+    depends_on:
+      postgres:  { condition: service_healthy }
+      payment:   { condition: service_started }
+      inventory: { condition: service_started }
+      notification: { condition: service_started }
+    restart: unless-stopped
+    networks: [astrasre]
+
+  inventory:
+    build: .
+    command: python services/inventory.py
+    ports:
+      - "5003:5003"
+      - "8002:8002"
+    environment:
+      <<: *service-env
+    depends_on:
+      redis:   { condition: service_healthy }
+      payment: { condition: service_started }
+    restart: unless-stopped
+    networks: [astrasre]
+
+  frontend:
+    build: .
+    command: python services/frontend.py
+    ports:
+      - "5000:5000"
+      - "8003:8003"
+    environment:
+      <<: *service-env
+    depends_on: [order]
+    restart: unless-stopped
+    networks: [astrasre]
+
+  notification:
+    build: .
+    command: python services/notification.py
+    ports:
+      - "5004:5004"
+      - "8004:8004"
+    environment:
+      <<: *service-env
+    restart: unless-stopped
+    networks: [astrasre]
+
+  # ── Load Generator ─────────────────────────────────────────────────────
+
+  loadgen:
+    build: .
+    command: python loadgen.py
+    environment:
+      <<: *service-env
+    depends_on: [frontend, order, inventory, notification]
+    restart: unless-stopped
+    networks: [astrasre]
+
+  # ── Orchestrator ───────────────────────────────────────────────────────
+
+  orchestrator:
+    build: .
+    command: python orchestrator.py
+    ports:
+      - "5010:5010"
+    environment:
+      <<: *service-env
+      LOOP_INTERVAL: "5"
+      GROQ_API_KEY:  "${GROQ_API_KEY:-}"
+      OLLAMA_URL:    "http://host.docker.internal:11434"
+      DISCORD_WEBHOOK_URL: "${DISCORD_WEBHOOK_URL:-}"
+    volumes:
+      # Mount Docker socket so orchestrator can run real container restarts
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      postgres:     { condition: service_healthy }
+      redis:        { condition: service_healthy }
+      prometheus:   { condition: service_started }
+      loki:         { condition: service_started }
+    restart: unless-stopped
+    networks: [astrasre]
+
+  # ── Observability ──────────────────────────────────────────────────────
+
+  prometheus:
+    image: prom/prometheus:v2.50.1
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.retention.time=1h'
+    restart: unless-stopped
+    networks: [astrasre]
+
+  loki:
+    image: grafana/loki:2.9.4
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+    restart: unless-stopped
+    networks: [astrasre]
+
+  promtail:
+    image: grafana/promtail:2.9.4
+    volumes:
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./promtail-config.yml:/etc/promtail/config.yml:ro
+    command: -config.file=/etc/promtail/config.yml
+    depends_on: [loki]
+    restart: unless-stopped
+    networks: [astrasre]
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.55
+    ports:
+      - "16686:16686"    # Jaeger UI
+      - "4318:4318"      # OTLP HTTP
+      - "6831:6831/udp"  # Thrift agent
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    restart: unless-stopped
+    networks: [astrasre]
+
+volumes:
+  postgres_data:
+
+networks:
+  astrasre:
+    driver: bridge

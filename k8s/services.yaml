@@ -1,0 +1,171 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order
+  labels: { app: order }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: order }
+  template:
+    metadata:
+      labels: { app: order }
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port:   "8001"
+    spec:
+      containers:
+        - name: order
+          image: astrasre/order:latest
+          command: ["python", "services/order.py"]
+          ports:
+            - containerPort: 5001; name: app
+            - containerPort: 8001; name: metrics
+          env:
+            - name: LOKI_URL;          value: http://loki:3100
+            - name: OTLP_ENDPOINT;     value: http://jaeger:4318/v1/traces
+            - name: INVENTORY_URL;     value: http://inventory:5003
+            - name: NOTIFICATION_URL;  value: http://notification:5004
+          livenessProbe:
+            httpGet: { path: /health, port: 5001 }
+            initialDelaySeconds: 10; periodSeconds: 10
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits:   { cpu: 200m, memory: 256Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: order
+spec:
+  selector: { app: order }
+  ports:
+    - name: app;     port: 5001
+    - name: metrics; port: 8001
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inventory
+  labels: { app: inventory }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: inventory }
+  template:
+    metadata:
+      labels: { app: inventory }
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port:   "8002"
+    spec:
+      containers:
+        - name: inventory
+          image: astrasre/inventory:latest
+          command: ["python", "services/inventory.py"]
+          ports:
+            - containerPort: 5003; name: app
+            - containerPort: 8002; name: metrics
+          env:
+            - name: LOKI_URL;      value: http://loki:3100
+            - name: OTLP_ENDPOINT; value: http://jaeger:4318/v1/traces
+            - name: PAYMENT_URL;   value: http://payment:5002
+          livenessProbe:
+            httpGet: { path: /health, port: 5003 }
+            initialDelaySeconds: 10; periodSeconds: 10
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits:   { cpu: 200m, memory: 256Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: inventory
+spec:
+  selector: { app: inventory }
+  ports:
+    - name: app;     port: 5003
+    - name: metrics; port: 8002
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  labels: { app: frontend }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: frontend }
+  template:
+    metadata:
+      labels: { app: frontend }
+    spec:
+      containers:
+        - name: frontend
+          image: astrasre/frontend:latest
+          command: ["python", "services/frontend.py"]
+          ports:
+            - containerPort: 5000; name: app
+            - containerPort: 8003; name: metrics
+          env:
+            - name: LOKI_URL;      value: http://loki:3100
+            - name: OTLP_ENDPOINT; value: http://jaeger:4318/v1/traces
+            - name: ORDER_URL;     value: http://order:5001
+          livenessProbe:
+            httpGet: { path: /health, port: 5000 }
+            initialDelaySeconds: 10; periodSeconds: 10
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits:   { cpu: 200m, memory: 256Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+spec:
+  type: NodePort
+  selector: { app: frontend }
+  ports:
+    - name: app;     port: 5000; nodePort: 30000
+    - name: metrics; port: 8003
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notification
+  labels: { app: notification }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: notification }
+  template:
+    metadata:
+      labels: { app: notification }
+    spec:
+      containers:
+        - name: notification
+          image: astrasre/notification:latest
+          command: ["python", "services/notification.py"]
+          ports:
+            - containerPort: 5004; name: app
+            - containerPort: 8004; name: metrics
+          env:
+            - name: LOKI_URL;      value: http://loki:3100
+            - name: OTLP_ENDPOINT; value: http://jaeger:4318/v1/traces
+          livenessProbe:
+            httpGet: { path: /health, port: 5004 }
+            initialDelaySeconds: 10; periodSeconds: 10
+          resources:
+            requests: { cpu: 25m, memory: 64Mi }
+            limits:   { cpu: 100m, memory: 128Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: notification
+spec:
+  selector: { app: notification }
+  ports:
+    - name: app;     port: 5004
+    - name: metrics; port: 8004

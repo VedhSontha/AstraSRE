@@ -1,0 +1,27 @@
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  - job_name: 'astrasre-services'
+    static_configs:
+      - targets:
+          - 'payment:8000'
+          - 'order:8001'
+          - 'inventory:8002'
+          - 'frontend:8003'
+          - 'notification:8004'
+    relabel_configs:
+      - source_labels: [__address__]
+        regex: '([^:]+).*'
+        target_label: instance
+        replacement: '$1'
+
+  # PostgreSQL exporter (future: add postgres_exporter sidecar)
+  # Redis exporter (future: add redis_exporter sidecar)
+  # For now, DB metrics come from service-level gauges:
+  # - db_query_duration_ms{service="payment"}
+  # - cache_hit_rate{service="inventory"}
+  # - cache_hit_total{service="inventory"}
+  # - cache_miss_total{service="inventory"}
+  # - db_error_total{service="payment"}

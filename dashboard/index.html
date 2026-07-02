@@ -1,0 +1,1314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AstraSRE — Autonomous Chaos Engineering Platform</title>
+  <meta name="description" content="AI-powered SRE agent: real-time anomaly detection, root cause analysis, and autonomous remediation dashboard." />
+
+  <!-- Socket.io -->
+  <script src="https://cdn.socket.io/4.7.4/socket.io.min.js"></script>
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+  <!-- Marked (markdown → HTML for report) -->
+  <script src="https://cdn.jsdelivr.net/npm/marked@12.0.0/marked.min.js"></script>
+
+  <style>
+    /* ── Tokens ─────────────────────────────────────────────────────── */
+    :root {
+      --bg:       #07090f;
+      --surface:  #0d1117;
+      --card:     #111827;
+      --border:   #1f2937;
+      --accent:   #6366f1;
+      --accent2:  #8b5cf6;
+      --cyan:     #22d3ee;
+      --green:    #10b981;
+      --yellow:   #f59e0b;
+      --red:      #ef4444;
+      --orange:   #f97316;
+      --text:     #e2e8f0;
+      --muted:    #64748b;
+      --font:     'Inter', system-ui, sans-serif;
+      --radius:   12px;
+      --glow:     0 0 20px rgba(99,102,241,0.3);
+    }
+
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* ── Grid background ────────────────────────────────────────────── */
+    body::before {
+      content: '';
+      position: fixed; inset: 0; z-index: 0;
+      background-image:
+        linear-gradient(rgba(99,102,241,0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(99,102,241,0.03) 1px, transparent 1px);
+      background-size: 40px 40px;
+      pointer-events: none;
+    }
+
+    /* ── Header ─────────────────────────────────────────────────────── */
+    header {
+      position: sticky; top: 0; z-index: 100;
+      background: rgba(7,9,15,0.9);
+      backdrop-filter: blur(20px);
+      border-bottom: 1px solid var(--border);
+      padding: 0 24px;
+      height: 64px;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+
+    .logo {
+      display: flex; align-items: center; gap: 12px;
+    }
+    .logo-icon {
+      width: 36px; height: 36px;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 18px; box-shadow: var(--glow);
+    }
+    .logo-text { font-size: 20px; font-weight: 700; letter-spacing: -0.5px; }
+    .logo-text span { color: var(--accent); }
+
+    .header-status {
+      display: flex; align-items: center; gap: 8px;
+      font-size: 12px; color: var(--muted);
+    }
+    .pulse {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--green);
+      animation: pulse 2s infinite;
+    }
+    .pulse.bad  { background: var(--red); }
+    .pulse.warn { background: var(--yellow); }
+
+    @keyframes pulse {
+      0%,100% { opacity: 1; box-shadow: 0 0 0 0 currentColor; }
+      50%      { opacity: 0.7; box-shadow: 0 0 0 5px transparent; }
+    }
+
+    .header-controls { display: flex; gap: 8px; }
+
+    /* ── Buttons ────────────────────────────────────────────────────── */
+    .btn {
+      padding: 8px 16px; border-radius: 8px; border: none;
+      font-family: var(--font); font-size: 13px; font-weight: 500;
+      cursor: pointer; transition: all 0.2s; white-space: nowrap;
+    }
+    .btn-primary {
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      color: white; box-shadow: 0 4px 12px rgba(99,102,241,0.3);
+    }
+    .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(99,102,241,0.4); }
+    .btn-danger { background: rgba(239,68,68,0.15); color: var(--red); border: 1px solid rgba(239,68,68,0.3); }
+    .btn-danger:hover { background: rgba(239,68,68,0.25); }
+    .btn-warn { background: rgba(245,158,11,0.15); color: var(--yellow); border: 1px solid rgba(245,158,11,0.3); }
+    .btn-warn:hover { background: rgba(245,158,11,0.25); }
+    .btn-success { background: rgba(16,185,129,0.15); color: var(--green); border: 1px solid rgba(16,185,129,0.3); }
+    .btn-success:hover { background: rgba(16,185,129,0.25); }
+    .btn-ghost { background: transparent; color: var(--muted); border: 1px solid var(--border); }
+    .btn-ghost:hover { border-color: var(--accent); color: var(--accent); }
+
+    /* ── Select ─────────────────────────────────────────────────────── */
+    select {
+      background: var(--card); color: var(--text);
+      border: 1px solid var(--border); border-radius: 8px;
+      padding: 8px 12px; font-size: 13px; font-family: var(--font);
+      cursor: pointer; outline: none;
+    }
+    select:focus { border-color: var(--accent); }
+
+    /* ── DB Status ───────────────────────────────────────────────────── */
+    #db-card {
+      grid-column: 1 / 4;
+      grid-row: 0;
+    }
+    .db-status-row {
+      display: flex; gap: 12px; flex-wrap: wrap;
+    }
+    .db-chip {
+      display: flex; align-items: center; gap: 10px;
+      padding: 10px 16px; border-radius: 8px;
+      background: var(--surface); border: 1px solid var(--border);
+      flex: 1; min-width: 200px;
+      transition: border-color 0.3s;
+    }
+    .db-chip.ok   { border-color: rgba(16,185,129,0.4); }
+    .db-chip.fail { border-color: rgba(239,68,68,0.5); animation: shake 0.5s ease; }
+    .db-chip-icon { font-size: 22px; }
+    .db-chip-info { flex: 1; }
+    .db-chip-name { font-size: 13px; font-weight: 600; }
+    .db-chip-meta { font-size: 11px; color: var(--muted); font-family: 'JetBrains Mono', monospace; margin-top: 2px; }
+    .db-chip-badge {
+      font-size: 9px; font-weight: 700; padding: 3px 8px;
+      border-radius: 12px; text-transform: uppercase;
+    }
+    .db-chip-badge.ok   { background: rgba(16,185,129,0.2); color: var(--green); }
+    .db-chip-badge.fail { background: rgba(239,68,68,0.2); color: var(--red); }
+
+    /* ── Main layout ────────────────────────────────────────────────── */
+    main {
+      position: relative; z-index: 1;
+      padding: 20px 24px;
+      display: grid;
+      gap: 16px;
+      grid-template-columns: 1fr 1fr 320px;
+      grid-template-rows: auto auto auto auto;
+    }
+
+    /* ── Card ───────────────────────────────────────────────────────── */
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      transition: border-color 0.3s;
+    }
+    .card:hover { border-color: rgba(99,102,241,0.3); }
+    .card.alert-critical { border-color: rgba(239,68,68,0.5); box-shadow: 0 0 20px rgba(239,68,68,0.1); }
+    .card.alert-warning  { border-color: rgba(245,158,11,0.4); box-shadow: 0 0 15px rgba(245,158,11,0.08); }
+
+    .card-header {
+      padding: 14px 16px 10px;
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .card-title {
+      font-size: 11px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 1px; color: var(--muted);
+      display: flex; align-items: center; gap: 8px;
+    }
+    .card-title .icon { font-size: 14px; }
+    .card-body { padding: 16px; }
+
+    /* ── Service Map ────────────────────────────────────────────────── */
+    #service-map-card {
+      grid-column: 1;
+      grid-row: 1;
+    }
+
+    .service-map {
+      display: flex; flex-direction: column;
+      align-items: center; gap: 0;
+      padding: 12px 0;
+    }
+
+    .map-row { display: flex; align-items: center; gap: 16px; }
+    .map-connector-v {
+      width: 2px; height: 28px; margin: 0 auto;
+      background: linear-gradient(to bottom, var(--border), var(--border));
+      position: relative;
+    }
+    .map-connector-v::after {
+      content: '▼'; color: var(--border); font-size: 10px;
+      position: absolute; bottom: -8px; left: 50%;
+      transform: translateX(-50%);
+    }
+    .map-connectors-fork {
+      display: flex; align-items: flex-start; gap: 0;
+      margin: 0 auto;
+    }
+
+    .service-node {
+      padding: 10px 16px; border-radius: 10px;
+      border: 2px solid var(--border);
+      background: var(--surface);
+      text-align: center; cursor: default;
+      transition: all 0.4s cubic-bezier(0.34,1.56,0.64,1);
+      min-width: 110px;
+      position: relative;
+    }
+    .service-node.NORMAL   { border-color: rgba(16,185,129,0.4); }
+    .service-node.WARNING  { border-color: rgba(245,158,11,0.5); background: rgba(245,158,11,0.05); }
+    .service-node.CRITICAL { border-color: rgba(239,68,68,0.6); background: rgba(239,68,68,0.08);
+                             animation: shake 0.5s ease; }
+
+    @keyframes shake {
+      0%,100% { transform: translateX(0); }
+      25%      { transform: translateX(-3px); }
+      75%      { transform: translateX(3px); }
+    }
+
+    .node-name { font-size: 13px; font-weight: 600; }
+    .node-score {
+      font-size: 11px; color: var(--muted); margin-top: 3px;
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .node-badge {
+      display: inline-block; font-size: 9px; font-weight: 700;
+      padding: 2px 6px; border-radius: 4px; margin-top: 4px;
+      text-transform: uppercase; letter-spacing: 0.5px;
+    }
+    .badge-NORMAL   { background: rgba(16,185,129,0.2); color: var(--green); }
+    .badge-WARNING  { background: rgba(245,158,11,0.2); color: var(--yellow); }
+    .badge-CRITICAL { background: rgba(239,68,68,0.2); color: var(--red); }
+
+    /* ── Metrics chart ──────────────────────────────────────────────── */
+    #metrics-card {
+      grid-column: 2;
+      grid-row: 1;
+    }
+    .metrics-select { display: flex; gap: 8px; flex-wrap: wrap; }
+    .metrics-select .metric-tab {
+      padding: 4px 10px; border-radius: 6px; font-size: 11px;
+      font-weight: 500; cursor: pointer; border: 1px solid var(--border);
+      background: transparent; color: var(--muted); transition: all 0.2s;
+    }
+    .metric-tab.active {
+      border-color: var(--accent); color: var(--accent);
+      background: rgba(99,102,241,0.1);
+    }
+    #metrics-chart-container { position: relative; height: 200px; margin-top: 12px; }
+
+    /* ── AI Status ──────────────────────────────────────────────────── */
+    #ai-card {
+      grid-column: 3;
+      grid-row: 1 / 3;
+    }
+
+    .anomaly-list { display: flex; flex-direction: column; gap: 8px; }
+    .anomaly-item {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px; padding: 10px 12px;
+      transition: all 0.3s;
+    }
+    .anomaly-item.CRITICAL { border-left: 3px solid var(--red); }
+    .anomaly-item.WARNING  { border-left: 3px solid var(--yellow); }
+    .anomaly-item.NORMAL   { border-left: 3px solid var(--green); }
+
+    .ai-svc-name { font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+    .score-bar-wrap {
+      background: var(--border); border-radius: 4px; height: 6px; overflow: hidden;
+    }
+    .score-bar {
+      height: 100%; border-radius: 4px;
+      transition: width 0.5s ease;
+    }
+    .score-bar.NORMAL   { background: var(--green); }
+    .score-bar.WARNING  { background: var(--yellow); }
+    .score-bar.CRITICAL { background: linear-gradient(90deg, var(--orange), var(--red)); }
+
+    .ai-meta {
+      display: flex; justify-content: space-between; margin-top: 4px;
+      font-size: 10px; color: var(--muted); font-family: 'JetBrains Mono', monospace;
+    }
+
+    .rca-block {
+      margin-top: 14px; padding: 12px;
+      background: rgba(239,68,68,0.06); border: 1px solid rgba(239,68,68,0.2);
+      border-radius: 8px; font-size: 12px;
+    }
+    .rca-block.hidden { display: none; }
+    .rca-title { font-weight: 700; color: var(--red); margin-bottom: 6px; font-size: 11px;
+                 text-transform: uppercase; letter-spacing: 0.5px; }
+    .rca-service { font-size: 16px; font-weight: 700; color: var(--text); }
+    .rca-affected { color: var(--muted); font-size: 11px; margin-top: 4px; }
+
+    /* ── Logs ───────────────────────────────────────────────────────── */
+    #logs-card {
+      grid-column: 1;
+      grid-row: 2;
+    }
+    .log-filter { display: flex; gap: 6px; flex-wrap: wrap; }
+    .log-filter .filter-btn {
+      padding: 3px 8px; border-radius: 5px; font-size: 10px; font-weight: 600;
+      cursor: pointer; border: 1px solid var(--border); background: transparent;
+      color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px;
+      font-family: var(--font); transition: all 0.2s;
+    }
+    .filter-btn.active { border-color: var(--cyan); color: var(--cyan);
+                          background: rgba(34,211,238,0.1); }
+
+    .log-scroll {
+      height: 220px; overflow-y: auto; margin-top: 10px;
+      font-family: 'JetBrains Mono', monospace; font-size: 11px;
+      display: flex; flex-direction: column; gap: 2px;
+    }
+    .log-scroll::-webkit-scrollbar { width: 4px; }
+    .log-scroll::-webkit-scrollbar-track { background: transparent; }
+    .log-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    .log-line {
+      padding: 4px 8px; border-radius: 4px;
+      background: var(--surface); border-left: 2px solid transparent;
+      line-height: 1.5; word-break: break-all;
+      animation: fadeIn 0.3s ease;
+    }
+    .log-line.INFO  { border-left-color: var(--cyan); }
+    .log-line.WARN  { border-left-color: var(--yellow); background: rgba(245,158,11,0.05); }
+    .log-line.ERROR { border-left-color: var(--red); background: rgba(239,68,68,0.06); }
+    .log-svc  { color: var(--accent); font-weight: 500; }
+    .log-time { color: var(--muted); }
+    .log-msg  { color: var(--text); }
+
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; } }
+
+    /* ── Incident Report ────────────────────────────────────────────── */
+    #report-card {
+      grid-column: 2;
+      grid-row: 2;
+    }
+    .report-body {
+      font-size: 13px; line-height: 1.7; color: var(--text);
+      max-height: 260px; overflow-y: auto;
+    }
+    .report-body::-webkit-scrollbar { width: 4px; }
+    .report-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+    .report-body strong { color: var(--accent); }
+    .report-body code {
+      background: var(--surface); color: var(--cyan);
+      padding: 1px 5px; border-radius: 4px;
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .report-placeholder {
+      color: var(--muted); font-size: 13px; text-align: center;
+      padding: 40px 20px;
+    }
+
+    /* ── MTTR Chart ─────────────────────────────────────────────────── */
+    #mttr-card {
+      grid-column: 1 / 3;
+      grid-row: 4;
+    }
+    #mttr-chart-container { position: relative; height: 140px; margin-top: 8px; }
+
+    /* ── Action Panel ───────────────────────────────────────────────── */
+    #action-card {
+      grid-column: 3;
+      grid-row: 4;
+    }
+    .action-log { display: flex; flex-direction: column; gap: 6px;
+                  max-height: 155px; overflow-y: auto; }
+    .action-entry {
+      padding: 8px 10px; border-radius: 6px;
+      background: var(--surface); border-left: 3px solid var(--green);
+      font-size: 11px; font-family: 'JetBrains Mono', monospace;
+      animation: fadeIn 0.4s ease;
+    }
+    .action-entry.restart        { border-left-color: var(--accent); }
+    .action-entry.scale          { border-left-color: var(--cyan); }
+    .action-entry.cache_recovery { border-left-color: var(--orange); }
+    .action-entry .act-service { font-weight: 600; color: var(--text); }
+    .action-entry .act-meta   { color: var(--muted); font-size: 10px; }
+
+    /* ── Stat pills in header ───────────────────────────────────────── */
+    .stat-pills { display: flex; gap: 8px; }
+    .stat-pill {
+      padding: 4px 10px; border-radius: 20px;
+      font-size: 11px; font-weight: 500;
+      background: var(--surface); border: 1px solid var(--border);
+    }
+    .stat-pill .val { font-weight: 700; }
+    .stat-pill.red-pill  { border-color: rgba(239,68,68,0.3); }
+    .stat-pill.cyan-pill { border-color: rgba(34,211,238,0.3); }
+
+    /* ── Responsive ─────────────────────────────────────────────────── */
+    @media (max-width: 1200px) {
+      main { grid-template-columns: 1fr 1fr; }
+      #db-card    { grid-column: 1 / 3; grid-row: 1; }
+      #service-map-card { grid-column: 1; grid-row: 2; }
+      #metrics-card     { grid-column: 2; grid-row: 2; }
+      #ai-card    { grid-column: 1 / 3; grid-row: 3; }
+      #logs-card  { grid-column: 1;     grid-row: 4; }
+      #report-card{ grid-column: 2;     grid-row: 4; }
+      #mttr-card  { grid-column: 1 / 3; grid-row: 5; }
+      #action-card{ grid-column: 1 / 3; grid-row: 6; }
+    }
+    @media (max-width: 720px) {
+      main { grid-template-columns: 1fr; padding: 12px; }
+      #db-card, #service-map-card, #metrics-card, #ai-card,
+      #logs-card, #report-card, #mttr-card, #action-card {
+        grid-column: 1; grid-row: auto;
+      }
+    }
+  </style>
+</head>
+
+<body>
+
+<!-- ── Header ──────────────────────────────────────────────────────────── -->
+<header>
+  <div class="logo">
+    <div class="logo-icon">🛰</div>
+    <div>
+      <div class="logo-text">Astra<span>SRE</span></div>
+    </div>
+  </div>
+
+  <div class="stat-pills">
+    <div class="stat-pill" id="stat-anomalies">
+      Anomalies: <span class="val" id="stat-anom-val">–</span>
+    </div>
+    <div class="stat-pill cyan-pill" id="stat-mttr">
+      Last MTTR: <span class="val" id="stat-mttr-val">–</span>
+    </div>
+    <div class="header-status">
+      <div class="pulse" id="conn-pulse"></div>
+      <span id="conn-label">Connecting…</span>
+    </div>
+  </div>
+
+  <div class="header-controls">
+    <select id="inject-service">
+      <option value="payment">payment</option>
+      <option value="order">order</option>
+      <option value="inventory">inventory</option>
+      <option value="frontend">frontend</option>
+      <option value="notification">notification</option>
+    </select>
+    <select id="inject-type">
+      <option value="db_timeout">💾 DB / Cache Failure</option>
+      <option value="latency">🐢 Latency Spike</option>
+      <option value="crash">💥 Crash (Pod Kill)</option>
+      <option value="all">☢ All Failures</option>
+    </select>
+    <button class="btn btn-danger" id="btn-inject" onclick="injectFailure()">💥 Inject</button>
+    <button class="btn btn-success" id="btn-heal" onclick="healAll()">✅ Heal All</button>
+    <button class="btn btn-ghost" onclick="resetAll()">↺ Reset</button>
+  </div>
+</header>
+
+<!-- ── Main Grid ────────────────────────────────────────────────────────── -->
+<main>
+  <div class="card" id="service-map-card">
+    <div class="card-header">
+      <div class="card-title"><span class="icon">🗸</span> Live Dependency Graph</div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <span id="selected-svc-chip" style="display:none;padding:3px 10px;border-radius:12px;
+          background:rgba(99,102,241,0.15);border:1px solid rgba(99,102,241,0.4);
+          font-size:11px;color:var(--accent);cursor:pointer" onclick="clearServiceSelection()"
+          title="Click to clear selection">× <span id="selected-svc-label"></span></span>
+        <small style="color:var(--muted);font-size:10px">Click node to drilldown</small>
+      </div>
+    </div>
+    <div class="card-body" style="padding:8px">
+      <svg id="service-graph" viewBox="0 0 460 400" width="100%" height="380"
+           style="overflow:visible">
+        <defs>
+          <!-- Arrow markers -->
+          <marker id="arr-normal" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+            <path d="M0,0 L0,6 L8,3 z" fill="#374151"/>
+          </marker>
+          <marker id="arr-warn" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+            <path d="M0,0 L0,6 L8,3 z" fill="#f59e0b"/>
+          </marker>
+          <marker id="arr-crit" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+            <path d="M0,0 L0,6 L8,3 z" fill="#ef4444"/>
+          </marker>
+          <!-- Glow filters -->
+          <filter id="glow-red" x="-40%" y="-40%" width="180%" height="180%">
+            <feGaussianBlur stdDeviation="5" result="blur"/>
+            <feFlood flood-color="#ef4444" flood-opacity="0.7" result="clr"/>
+            <feComposite in="clr" in2="blur" operator="in" result="shadow"/>
+            <feMerge><feMergeNode in="shadow"/><feMergeNode in="SourceGraphic"/></feMerge>
+          </filter>
+          <filter id="glow-yellow" x="-40%" y="-40%" width="180%" height="180%">
+            <feGaussianBlur stdDeviation="4" result="blur"/>
+            <feFlood flood-color="#f59e0b" flood-opacity="0.6" result="clr"/>
+            <feComposite in="clr" in2="blur" operator="in" result="shadow"/>
+            <feMerge><feMergeNode in="shadow"/><feMergeNode in="SourceGraphic"/></feMerge>
+          </filter>
+          <filter id="glow-green" x="-30%" y="-30%" width="160%" height="160%">
+            <feGaussianBlur stdDeviation="2" result="blur"/>
+            <feFlood flood-color="#10b981" flood-opacity="0.3" result="clr"/>
+            <feComposite in="clr" in2="blur" operator="in" result="shadow"/>
+            <feMerge><feMergeNode in="shadow"/><feMergeNode in="SourceGraphic"/></feMerge>
+          </filter>
+          <filter id="glow-select" x="-40%" y="-40%" width="180%" height="180%">
+            <feGaussianBlur stdDeviation="6" result="blur"/>
+            <feFlood flood-color="#6366f1" flood-opacity="0.8" result="clr"/>
+            <feComposite in="clr" in2="blur" operator="in" result="shadow"/>
+            <feMerge><feMergeNode in="shadow"/><feMergeNode in="SourceGraphic"/></feMerge>
+          </filter>
+        </defs>
+
+        <!-- ── Edges ──────────────────────────────────────────────────── -->
+        <!-- frontend → order -->
+        <path id="edge-frontend-order"
+          d="M 230 87 C 230 115 230 120 230 140"
+          fill="none" stroke="#374151" stroke-width="2"
+          marker-end="url(#arr-normal)" class="graph-edge"/>
+        <!-- order → inventory -->
+        <path id="edge-order-inventory"
+          d="M 195 210 C 160 240 140 245 120 263"
+          fill="none" stroke="#374151" stroke-width="2"
+          marker-end="url(#arr-normal)" class="graph-edge"/>
+        <!-- order → notification -->
+        <path id="edge-order-notification"
+          d="M 265 210 C 300 240 320 245 340 263"
+          fill="none" stroke="#374151" stroke-width="2" stroke-dasharray="5,3"
+          marker-end="url(#arr-normal)" class="graph-edge"/>
+        <!-- inventory → payment -->
+        <path id="edge-inventory-payment"
+          d="M 120 323 C 120 340 120 343 120 360"
+          fill="none" stroke="#374151" stroke-width="2"
+          marker-end="url(#arr-normal)" class="graph-edge"/>
+
+        <!-- DB badge lines -->
+        <!-- payment → postgres -->
+        <path d="M 165 385 C 210 385 220 385 232 385"
+          fill="none" stroke="#374151" stroke-width="1.5" stroke-dasharray="3,2"
+          marker-end="url(#arr-normal)"/>
+        <!-- inventory → redis -->
+        <path d="M 165 300 C 210 300 220 300 232 300"
+          fill="none" stroke="#374151" stroke-width="1.5" stroke-dasharray="3,2"
+          marker-end="url(#arr-normal)"/>
+
+        <!-- DB icons -->
+        <rect x="233" y="289" width="80" height="24" rx="6"
+          fill="#0d1117" stroke="#1f2937" stroke-width="1"/>
+        <text x="273" y="306" text-anchor="middle" fill="#64748b"
+          font-size="10" font-family="JetBrains Mono,monospace">Redis ⚡</text>
+
+        <rect x="233" y="374" width="80" height="24" rx="6"
+          fill="#0d1117" stroke="#1f2937" stroke-width="1"/>
+        <text x="273" y="391" text-anchor="middle" fill="#64748b"
+          font-size="10" font-family="JetBrains Mono,monospace">PG 🐘</text>
+
+        <!-- ── Nodes ───────────────────────────────────────────────────── -->
+
+        <!-- frontend (230, 60) -->
+        <g id="gnode-frontend" class="graph-node" onclick="selectService('frontend')" style="cursor:pointer">
+          <rect id="grect-frontend" x="150" y="30" width="160" height="57" rx="10"
+            fill="#111827" stroke="#10b981" stroke-width="2"/>
+          <text x="230" y="53" text-anchor="middle" fill="#e2e8f0"
+            font-size="13" font-weight="600" font-family="Inter,sans-serif">🖥 frontend</text>
+          <text id="gscore-frontend" x="230" y="70" text-anchor="middle" fill="#64748b"
+            font-size="9.5" font-family="JetBrains Mono,monospace">–</text>
+          <rect x="175" y="77" width="110" height="5" rx="2.5" fill="#1f2937"/>
+          <rect id="gbar-frontend" x="175" y="77" width="0" height="5" rx="2.5" fill="#10b981"/>
+        </g>
+
+        <!-- order (230, 175) -->
+        <g id="gnode-order" class="graph-node" onclick="selectService('order')" style="cursor:pointer">
+          <rect id="grect-order" x="150" y="145" width="160" height="57" rx="10"
+            fill="#111827" stroke="#10b981" stroke-width="2"/>
+          <text x="230" y="168" text-anchor="middle" fill="#e2e8f0"
+            font-size="13" font-weight="600" font-family="Inter,sans-serif">📦 order</text>
+          <text id="gscore-order" x="230" y="185" text-anchor="middle" fill="#64748b"
+            font-size="9.5" font-family="JetBrains Mono,monospace">–</text>
+          <rect x="175" y="192" width="110" height="5" rx="2.5" fill="#1f2937"/>
+          <rect id="gbar-order" x="175" y="192" width="0" height="5" rx="2.5" fill="#10b981"/>
+        </g>
+
+        <!-- inventory (120, 293) -->
+        <g id="gnode-inventory" class="graph-node" onclick="selectService('inventory')" style="cursor:pointer">
+          <rect id="grect-inventory" x="40" y="263" width="160" height="57" rx="10"
+            fill="#111827" stroke="#10b981" stroke-width="2"/>
+          <text x="120" y="286" text-anchor="middle" fill="#e2e8f0"
+            font-size="13" font-weight="600" font-family="Inter,sans-serif">🏭 inventory</text>
+          <text id="gscore-inventory" x="120" y="303" text-anchor="middle" fill="#64748b"
+            font-size="9.5" font-family="JetBrains Mono,monospace">–</text>
+          <rect x="65" y="310" width="110" height="5" rx="2.5" fill="#1f2937"/>
+          <rect id="gbar-inventory" x="65" y="310" width="0" height="5" rx="2.5" fill="#10b981"/>
+        </g>
+
+        <!-- notification (340, 293) -->
+        <g id="gnode-notification" class="graph-node" onclick="selectService('notification')" style="cursor:pointer">
+          <rect id="grect-notification" x="260" y="263" width="160" height="57" rx="10"
+            fill="#111827" stroke="#374151" stroke-width="2" opacity="0.8"/>
+          <text x="340" y="286" text-anchor="middle" fill="#94a3b8"
+            font-size="12" font-weight="600" font-family="Inter,sans-serif">🔔 notify</text>
+          <text id="gscore-notification" x="340" y="303" text-anchor="middle" fill="#64748b"
+            font-size="9.5" font-family="JetBrains Mono,monospace">–</text>
+          <rect x="285" y="310" width="110" height="5" rx="2.5" fill="#1f2937"/>
+          <rect id="gbar-notification" x="285" y="310" width="0" height="5" rx="2.5" fill="#374151"/>
+        </g>
+
+        <!-- payment (120, 385) -->
+        <g id="gnode-payment" class="graph-node" onclick="selectService('payment')" style="cursor:pointer">
+          <rect id="grect-payment" x="40" y="360" width="160" height="57" rx="10"
+            fill="#111827" stroke="#10b981" stroke-width="2"/>
+          <text x="120" y="383" text-anchor="middle" fill="#e2e8f0"
+            font-size="13" font-weight="600" font-family="Inter,sans-serif">💳 payment</text>
+          <text id="gscore-payment" x="120" y="400" text-anchor="middle" fill="#64748b"
+            font-size="9.5" font-family="JetBrains Mono,monospace">–</text>
+          <rect x="65" y="407" width="110" height="5" rx="2.5" fill="#1f2937"/>
+          <rect id="gbar-payment" x="65" y="407" width="0" height="5" rx="2.5" fill="#10b981"/>
+        </g>
+
+      </svg>
+    </div>
+  </div>
+
+
+  <!-- Metrics Charts -->
+  <div class="card" id="metrics-card">
+    <div class="card-header">
+      <div class="card-title"><span class="icon">📈</span> Live Metrics
+        <span id="metrics-svc-label" style="margin-left:8px;font-size:10px;color:var(--accent);display:none"></span>
+      </div>
+      <div class="metrics-select">
+        <button class="metric-tab active" onclick="switchMetric('cpu',this)">CPU</button>
+        <button class="metric-tab" onclick="switchMetric('latency',this)">Latency</button>
+        <button class="metric-tab" onclick="switchMetric('errors',this)">Errors</button>
+      </div>
+    </div>
+    <div class="card-body">
+      <div id="metrics-chart-container">
+        <canvas id="metricsChart"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- AI Status -->
+  <div class="card" id="ai-card">
+    <div class="card-header">
+      <div class="card-title"><span class="icon">🤖</span> AI Anomaly Engine</div>
+    </div>
+    <div class="card-body">
+      <div class="anomaly-list" id="anomaly-list">
+        <div style="color:var(--muted);font-size:13px;text-align:center;padding:20px">
+          Waiting for data…
+        </div>
+      </div>
+
+      <div class="rca-block hidden" id="rca-block">
+        <div class="rca-title">⚠ Root Cause Identified</div>
+        <div class="rca-service" id="rca-service">–</div>
+        <div class="rca-affected" id="rca-affected">–</div>
+        <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
+          <span class="node-badge badge-CRITICAL" id="rca-severity">–</span>
+          <span style="font-size:11px;color:var(--muted)" id="rca-score">–</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Logs -->
+  <div class="card" id="logs-card">
+    <div class="card-header">
+      <div class="card-title"><span class="icon">📜</span> Loki Log Stream</div>
+      <div class="log-filter">
+        <button class="filter-btn active" onclick="setLogFilter('all',this)">ALL</button>
+        <button class="filter-btn" onclick="setLogFilter('ERROR',this)">ERROR</button>
+        <button class="filter-btn" onclick="setLogFilter('WARN',this)">WARN</button>
+        <button class="filter-btn" onclick="setLogFilter('INFO',this)">INFO</button>
+      </div>
+    </div>
+    <div class="card-body">
+      <div class="log-scroll" id="log-scroll"></div>
+    </div>
+  </div>
+
+  <!-- Incident Report -->
+  <div class="card" id="report-card">
+    <div class="card-header">
+      <div class="card-title"><span class="icon">📋</span> AI Incident Report</div>
+      <span style="font-size:10px;color:var(--muted)" id="report-ts">–</span>
+    </div>
+    <div class="card-body">
+      <div class="report-body" id="report-body">
+        <div class="report-placeholder">🤖 Incident report will appear here after anomaly detection and remediation…</div>
+      </div>
+      <div id="jaeger-links" style="display:none;margin-top:10px;padding-top:10px;
+        border-top:1px solid var(--border);display:flex;gap:8px;flex-wrap:wrap">
+        <a id="jaeger-link" href="http://localhost:16686" target="_blank"
+          style="font-size:11px;color:var(--cyan);text-decoration:none;
+                 padding:4px 10px;border:1px solid rgba(34,211,238,0.3);border-radius:6px;
+                 background:rgba(34,211,238,0.06);">View Trace in Jaeger →</a>
+        <a href="http://localhost:9090" target="_blank"
+          style="font-size:11px;color:var(--accent);text-decoration:none;
+                 padding:4px 10px;border:1px solid rgba(99,102,241,0.3);border-radius:6px;
+                 background:rgba(99,102,241,0.06);">Prometheus →</a>
+        <a href="http://localhost:3100" target="_blank"
+          style="font-size:11px;color:var(--orange);text-decoration:none;
+                 padding:4px 10px;border:1px solid rgba(249,115,22,0.3);border-radius:6px;
+                 background:rgba(249,115,22,0.06);">Loki →</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- MTTR Timeline -->
+  <div class="card" id="mttr-card">
+    <div class="card-header">
+      <div class="card-title"><span class="icon">⏱</span> MTTR Recovery Timeline</div>
+      <small style="color:var(--muted);font-size:11px">Mean Time To Recover (seconds)</small>
+    </div>
+    <div class="card-body">
+      <div id="mttr-chart-container">
+        <canvas id="mttrChart"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- Action Log -->
+  <div class="card" id="action-card">
+    <div class="card-header">
+      <div class="card-title"><span class="icon">⚡</span> Remediation Log</div>
+    </div>
+    <div class="card-body">
+      <div class="action-log" id="action-log">
+        <div style="color:var(--muted);font-size:12px;text-align:center;padding:16px">
+          No remediations yet
+        </div>
+      </div>
+    </div>
+  </div>
+
+</main>
+
+<script>
+// ── Config ────────────────────────────────────────────────────────────────
+const ORCHESTRATOR = 'http://localhost:5010';
+const SERVICES     = ['payment','order','inventory','frontend','notification'];
+const MAX_POINTS   = 40;
+
+// ── State ─────────────────────────────────────────────────────────────────
+let activeMetric   = 'cpu';
+let logFilter      = 'all';
+let selectedService = null;   // null = all services
+let metricsHistory = {};
+SERVICES.forEach(s => { metricsHistory[s] = { cpu:[], latency:[], errors:[] }; });
+
+// ── SVG Dependency Graph ──────────────────────────────────────────────────
+const SEV_COLORS = { NORMAL:'#10b981', WARNING:'#f59e0b', CRITICAL:'#ef4444' };
+const SEV_FILTERS = { NORMAL:'glow-green', WARNING:'glow-yellow', CRITICAL:'glow-red' };
+
+// Edges: [edge-id, sourceService, destService]
+const GRAPH_EDGES = [
+  ['edge-frontend-order',     'frontend',  'order'],
+  ['edge-order-inventory',    'order',     'inventory'],
+  ['edge-order-notification', 'order',     'notification'],
+  ['edge-inventory-payment',  'inventory', 'payment'],
+];
+
+function updateServiceGraph(scores) {
+  SERVICES.forEach(svc => {
+    const info = scores[svc] || {};
+    const sev  = info.severity || 'NORMAL';
+    const score = info.score || 0;
+    const col  = SEV_COLORS[sev];
+
+    // Node rect border color + glow
+    const rect = document.getElementById('grect-' + svc);
+    if (rect) {
+      rect.setAttribute('stroke', col);
+      rect.setAttribute('stroke-width', sev === 'CRITICAL' ? '3' : '2');
+      const group = document.getElementById('gnode-' + svc);
+      if (group) {
+        group.setAttribute('filter',
+          sev !== 'NORMAL' ? `url(#${SEV_FILTERS[sev]})` :
+          (selectedService === svc ? 'url(#glow-select)' : ''));
+      }
+    }
+
+    // Score bar
+    const bar = document.getElementById('gbar-' + svc);
+    if (bar) {
+      const pct = Math.min(100, score * 100);
+      const barX1 = { frontend:175, order:175, inventory:65, notification:285, payment:65 }[svc];
+      const barMaxW = 110;
+      bar.setAttribute('width',  (pct / 100 * barMaxW).toFixed(1));
+      bar.setAttribute('fill', col);
+    }
+
+    // Score text
+    const scoreEl = document.getElementById('gscore-' + svc);
+    if (scoreEl) {
+      const icon = sev === 'NORMAL' ? '\u2713' : sev === 'WARNING' ? '\u26a0' : '\ud83d\udd34';
+      scoreEl.textContent = `${score.toFixed(3)} ${icon}`;
+      scoreEl.setAttribute('fill', sev === 'NORMAL' ? '#64748b' : col);
+    }
+  });
+
+  // Edge coloring — propagate severity along dependency paths
+  GRAPH_EDGES.forEach(([edgeId, src, dst]) => {
+    const srcSev = (scores[src] || {}).severity || 'NORMAL';
+    const dstSev = (scores[dst] || {}).severity || 'NORMAL';
+    const worstSev = (srcSev === 'CRITICAL' || dstSev === 'CRITICAL') ? 'CRITICAL'
+                   : (srcSev === 'WARNING'  || dstSev === 'WARNING')  ? 'WARNING'
+                   : 'NORMAL';
+    const edgeEl = document.getElementById(edgeId);
+    if (edgeEl) {
+      const edgeCol = SEV_COLORS[worstSev];
+      edgeEl.setAttribute('stroke', edgeCol);
+      edgeEl.setAttribute('stroke-width', worstSev === 'CRITICAL' ? '3':'2');
+      edgeEl.setAttribute('marker-end',
+        worstSev === 'CRITICAL' ? 'url(#arr-crit)' :
+        worstSev === 'WARNING'  ? 'url(#arr-warn)' : 'url(#arr-normal)');
+    }
+  });
+}
+
+// ── Per-service drilldown ─────────────────────────────────────────────────
+function selectService(svc) {
+  selectedService = (selectedService === svc) ? null : svc;
+
+  // Selected node highlight
+  SERVICES.forEach(s => {
+    const g = document.getElementById('gnode-' + s);
+    if (!g) return;
+    if (s === selectedService) {
+      g.setAttribute('filter', 'url(#glow-select)');
+    }
+  });
+
+  // Update chip
+  const chip  = document.getElementById('selected-svc-chip');
+  const label = document.getElementById('selected-svc-label');
+  if (selectedService) {
+    chip.style.display  = 'inline';
+    label.textContent   = selectedService;
+    // Auto-select this service in the inject dropdown
+    const injectSel = document.getElementById('inject-service');
+    if (injectSel) injectSel.value = selectedService;
+    // Filter logs to this service
+    logFilter = '_svc:' + selectedService;
+    renderLogs();
+  } else {
+    clearServiceSelection();
+  }
+
+  refreshMetricChart();
+}
+
+function clearServiceSelection() {
+  selectedService = null;
+  document.getElementById('selected-svc-chip').style.display = 'none';
+  logFilter = 'all';
+  renderLogs();
+  refreshMetricChart();
+}
+
+const COLORS = {
+  payment:      '#6366f1',
+  order:        '#22d3ee',
+  inventory:    '#10b981',
+  frontend:     '#f59e0b',
+  notification: '#a78bfa',
+};
+
+// ── Chart.js — Metrics ───────────────────────────────────────────────────
+const metricsCtx   = document.getElementById('metricsChart').getContext('2d');
+const metricsChart = new Chart(metricsCtx, {
+  type: 'line',
+  data: {
+    labels: [],
+    datasets: SERVICES.map(svc => ({
+      label: svc, data: [], borderColor: COLORS[svc],
+      backgroundColor: COLORS[svc] + '18',
+      borderWidth: 2, fill: true,
+      tension: 0.4, pointRadius: 0, pointHitRadius: 10,
+    })),
+  },
+  options: {
+    responsive: true, maintainAspectRatio: false, animation: { duration: 300 },
+    interaction: { mode: 'index', intersect: false },
+    scales: {
+      x: { display: false },
+      y: { grid:{ color:'rgba(255,255,255,0.05)' }, ticks:{ color:'#64748b', font:{ size:10 } } }
+    },
+    plugins: {
+      legend:  { labels:{ color:'#94a3b8', font:{ size:11 }, boxWidth:12, padding:12 } },
+      tooltip: { backgroundColor:'#111827', titleColor:'#e2e8f0', bodyColor:'#94a3b8',
+                 borderColor:'#1f2937', borderWidth:1 },
+    }
+  }
+});
+
+// ── Chart.js — MTTR ───────────────────────────────────────────────────────
+const mttrCtx   = document.getElementById('mttrChart').getContext('2d');
+const mttrChart = new Chart(mttrCtx, {
+  type: 'bar',
+  data: { labels: [], datasets: [{
+    label: 'Recovery Time (s)', data: [],
+    backgroundColor: 'rgba(99,102,241,0.6)',
+    borderColor: '#6366f1', borderWidth: 1, borderRadius: 6,
+  }]},
+  options: {
+    responsive: true, maintainAspectRatio: false, animation: { duration: 400 },
+    scales: {
+      x: { grid:{ display:false }, ticks:{ color:'#64748b', font:{ size:10 } } },
+      y: { grid:{ color:'rgba(255,255,255,0.05)' }, ticks:{ color:'#64748b', font:{ size:10 } } }
+    },
+    plugins: {
+      legend: { display: false },
+      tooltip: { backgroundColor:'#111827', titleColor:'#e2e8f0', bodyColor:'#94a3b8' },
+    }
+  }
+});
+
+// ── Socket.io ─────────────────────────────────────────────────────────────
+let socket;
+function connectSocket() {
+  socket = io(ORCHESTRATOR, { transports:['websocket','polling'] });
+
+  socket.on('connect', () => {
+    document.getElementById('conn-pulse').className = 'pulse';
+    document.getElementById('conn-label').textContent = 'Connected';
+  });
+
+  socket.on('disconnect', () => {
+    document.getElementById('conn-pulse').className = 'pulse bad';
+    document.getElementById('conn-label').textContent = 'Disconnected';
+  });
+
+  socket.on('update', (data) => {
+    updateDashboard(data);
+  });
+}
+
+// ── Dashboard update ──────────────────────────────────────────────────────
+function updateDashboard(data) {
+  const { anomaly_scores, metrics_raw, root_cause, last_action, report, mttr_history } = data;
+
+  if (!anomaly_scores) return;
+
+  // 1. SVG Dependency Graph
+  updateServiceGraph(anomaly_scores);
+  let critCount = Object.values(anomaly_scores).filter(i => i.severity === 'CRITICAL').length;
+
+  // 1b. DB Health panel
+  updateDbHealth(anomaly_scores, metrics_raw);
+
+  // 2. Stat pills
+  document.getElementById('stat-anom-val').textContent = critCount || '0';
+
+  // 3. Metrics history + chart
+  const ts = new Date().toLocaleTimeString('en', { hour12:false,  hour:'2-digit', minute:'2-digit', second:'2-digit' });
+  if (metrics_raw) {
+    SERVICES.forEach(svc => {
+      const m = metrics_raw[svc] || {};
+      const h = metricsHistory[svc];
+      h.cpu.push(+(m.cpu || 0).toFixed(1));
+      h.latency.push(+(m.latency_ms || 0).toFixed(1));
+      h.errors.push(+(m.error_rate || 0).toFixed(1));
+      if (h.cpu.length > MAX_POINTS)    h.cpu.shift();
+      if (h.latency.length > MAX_POINTS) h.latency.shift();
+      if (h.errors.length > MAX_POINTS)  h.errors.shift();
+    });
+  }
+  refreshMetricChart(ts);
+
+  // 4. Anomaly list
+  updateAnomalyList(anomaly_scores);
+
+  // 5. RCA block
+  if (root_cause) {
+    document.getElementById('rca-block').classList.remove('hidden');
+    document.getElementById('rca-service').textContent  = '🔴 ' + root_cause.service;
+    document.getElementById('rca-severity').textContent = root_cause.severity;
+    document.getElementById('rca-score').textContent    = `confidence: ${(root_cause.score*100).toFixed(1)}%`;
+    const aff = (root_cause.affected || []).join(', ') || 'none';
+    document.getElementById('rca-affected').textContent = `Blast radius: ${aff}`;
+  } else {
+    document.getElementById('rca-block').classList.add('hidden');
+  }
+
+  // 6. Incident report
+  if (report && report !== 'System starting up...') {
+    const html = marked.parse(report);
+    document.getElementById('report-body').innerHTML = html;
+    document.getElementById('report-ts').textContent =
+      new Date().toLocaleTimeString('en', { hour12:false });
+    // Show Jaeger link with service-specific search
+    const rcaSvc = root_cause ? root_cause.service : '';
+    const jaegerEl = document.getElementById('jaeger-links');
+    const jaegerLink = document.getElementById('jaeger-link');
+    if (jaegerEl && rcaSvc) {
+      jaegerEl.style.display = 'flex';
+      jaegerLink.href = `http://localhost:16686/search?service=${encodeURIComponent(rcaSvc)}&limit=20`;
+      jaegerLink.textContent = `View ${rcaSvc} traces in Jaeger →`;
+    }
+  }
+
+  // 7. MTTR chart
+  if (mttr_history && mttr_history.length > 0) {
+    mttrChart.data.labels   = mttr_history.map(r => r.service + '\n' + r.action);
+    mttrChart.data.datasets[0].data = mttr_history.map(r => r.recovery_time);
+    mttrChart.data.datasets[0].backgroundColor = mttr_history.map(r =>
+      r.recovered ? 'rgba(16,185,129,0.6)' : 'rgba(239,68,68,0.6)');
+    mttrChart.update();
+
+    const last = mttr_history[mttr_history.length - 1];
+    document.getElementById('stat-mttr-val').textContent = last.recovery_time.toFixed(1) + 's';
+  }
+
+  // 8. Action log
+  if (last_action && last_action.action) {
+    addActionEntry(last_action);
+  }
+
+  // 9. Logs from Loki
+  fetchLogs();
+}
+
+// ── Metric chart refresh ──────────────────────────────────────────────────
+function refreshMetricChart(ts) {
+  const keyMap = { cpu:'cpu', latency:'latency', errors:'errors' };
+  const key    = keyMap[activeMetric];
+  const labels = metricsHistory['payment'][key] || [];
+
+  metricsChart.data.labels = Array.from({ length: labels.length }, (_, i) => i);
+
+  if (selectedService) {
+    // Drilldown: highlight only selectedService, fade others
+    SERVICES.forEach((svc, i) => {
+      const isSelected = svc === selectedService;
+      metricsChart.data.datasets[i].data          = metricsHistory[svc][key] || [];
+      metricsChart.data.datasets[i].borderColor   = isSelected ? COLORS[svc] : COLORS[svc] + '33';
+      metricsChart.data.datasets[i].backgroundColor = isSelected ? COLORS[svc] + '28' : 'transparent';
+      metricsChart.data.datasets[i].borderWidth   = isSelected ? 2.5 : 1;
+      metricsChart.data.datasets[i].pointRadius   = isSelected ? 2 : 0;
+    });
+    const lbl = document.getElementById('metrics-svc-label');
+    if (lbl) { lbl.style.display = 'inline'; lbl.textContent = `→ ${selectedService}`; }
+  } else {
+    SERVICES.forEach((svc, i) => {
+      metricsChart.data.datasets[i].data          = metricsHistory[svc][key] || [];
+      metricsChart.data.datasets[i].borderColor   = COLORS[svc];
+      metricsChart.data.datasets[i].backgroundColor = COLORS[svc] + '18';
+      metricsChart.data.datasets[i].borderWidth   = 2;
+      metricsChart.data.datasets[i].pointRadius   = 0;
+    });
+    const lbl = document.getElementById('metrics-svc-label');
+    if (lbl) lbl.style.display = 'none';
+  }
+
+  const yLabel = { cpu:'CPU %', latency:'ms', errors:'Error %' }[activeMetric];
+  metricsChart.options.scales.y.title = { display:true, text: yLabel, color:'#64748b', font:{size:10} };
+  metricsChart.update();
+}
+
+function switchMetric(m, el) {
+  activeMetric = m;
+  document.querySelectorAll('.metric-tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  refreshMetricChart();
+}
+
+// ── Anomaly list ──────────────────────────────────────────────────────────
+function updateAnomalyList(scores) {
+  const list = document.getElementById('anomaly-list');
+  list.innerHTML = '';
+  const sorted = SERVICES.slice().sort((a, b) => ((scores[b]||{}).score||0) - ((scores[a]||{}).score||0));
+  sorted.forEach(svc => {
+    const info = scores[svc] || { score:0, severity:'NORMAL', confidence:0 };
+    const sev  = info.severity || 'NORMAL';
+    const pct  = Math.min(100, (info.score || 0) * 100).toFixed(1);
+    list.innerHTML += `
+      <div class="anomaly-item ${sev}">
+        <div class="ai-svc-name">${svc}
+          <span class="node-badge badge-${sev}" style="margin-left:6px">${sev}</span>
+        </div>
+        <div class="score-bar-wrap"><div class="score-bar ${sev}" style="width:${pct}%"></div></div>
+        <div class="ai-meta">
+          <span>score: ${(info.score||0).toFixed(3)}</span>
+          <span>conf: ${((info.confidence||0)*100).toFixed(0)}%</span>
+        </div>
+      </div>`;
+  });
+}
+
+// ── Log rendering ──────────────────────────────────────────────────────────
+let logCache = [];
+
+async function fetchLogs() {
+  try {
+    const r = await fetch(`${ORCHESTRATOR}/logs?limit=60`);
+    const { logs } = await r.json();
+    if (!logs || !logs.length) return;
+
+    logCache = logs.slice().reverse(); // newest first from our reverse query
+    renderLogs();
+  } catch(e) {}
+}
+
+function renderLogs() {
+  const el = document.getElementById('log-scroll');
+  let filtered = logCache;
+
+  if (logFilter.startsWith('_svc:')) {
+    // Per-service drilldown filter
+    const targetSvc = logFilter.slice(5);
+    filtered = logCache.filter(l => {
+      try { return JSON.parse(l).service === targetSvc; } catch { return false; }
+    });
+  } else if (logFilter !== 'all') {
+    filtered = logCache.filter(l => {
+      try { return JSON.parse(l).level === logFilter; } catch { return false; }
+    });
+  }
+
+  el.innerHTML = filtered.slice(0, 60).map(line => {
+    try {
+      const obj = JSON.parse(line);
+      const lvl = obj.level || 'INFO';
+      const svc = obj.service || '?';
+      const ts  = (obj.ts || '').slice(11, 19);
+      const msg = obj.message || line;
+      return `<div class="log-line ${lvl}">
+        <span class="log-time">${ts}</span>
+        <span class="log-svc"> [${svc}]</span>
+        <span class="log-msg"> ${msg}</span>
+      </div>`;
+    } catch {
+      return `<div class="log-line INFO"><span class="log-msg">${line}</span></div>`;
+    }
+  }).join('');
+  el.scrollTop = el.scrollHeight;
+}
+
+function setLogFilter(f, el) {
+  logFilter = f;
+  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+  renderLogs();
+}
+
+// ── Action log ────────────────────────────────────────────────────────────
+let actionHistory = [];
+function addActionEntry(action) {
+  const key = `${action.ts}-${action.service}-${action.action}`;
+  if (actionHistory.find(a => a._key === key)) return;
+  action._key = key;
+  actionHistory.unshift(action);
+  if (actionHistory.length > 20) actionHistory.pop();
+
+  const el = document.getElementById('action-log');
+  el.innerHTML = actionHistory.map(a => {
+    const iconMap = { restart:'🔄', scale:'↑📈', cache_recovery:'🗑️⚡' };
+    const icon    = iconMap[a.action] || '⚡';
+    const status  = a.recovered ? '✅' : '❌';
+    const ts      = (a.ts || '').slice(11, 19);
+    return `<div class="action-entry ${a.action}">
+      <div class="act-service">${icon} ${a.action} → <strong>${a.service}</strong> ${status}</div>
+      <div class="act-meta">${ts} · ${(a.recovery_time||0).toFixed(1)}s recovery · ${a.attempts||0} attempts</div>
+    </div>`;
+  }).join('');
+}
+
+// ── DB Health panel ───────────────────────────────────────────────────────
+function updateDbHealth(anomaly_scores, metrics_raw) {
+  // PostgreSQL health: inferred from payment + order anomaly scores
+  const pgServices   = ['payment', 'order'];
+  const pgFailing    = pgServices.some(s => (anomaly_scores[s]||{}).is_anomaly);
+  const pgSev        = pgServices
+    .map(s => (anomaly_scores[s]||{}).severity || 'NORMAL')
+    .find(s => s !== 'NORMAL') || 'NORMAL';
+
+  const pgEl    = document.getElementById('db-postgres');
+  const pgBadge = document.getElementById('pg-badge');
+  if (pgFailing && pgSev === 'CRITICAL') {
+    pgEl.className    = 'db-chip fail';
+    pgBadge.className = 'db-chip-badge fail';
+    pgBadge.textContent = 'FAILING';
+  } else if (pgFailing) {
+    pgEl.className    = 'db-chip warn';
+    pgBadge.className = 'db-chip-badge';
+    pgBadge.style.background = 'rgba(245,158,11,0.2)';
+    pgBadge.style.color = 'var(--yellow)';
+    pgBadge.textContent = 'DEGRADED';
+  } else {
+    pgEl.className    = 'db-chip ok';
+    pgBadge.className = 'db-chip-badge ok';
+    pgBadge.textContent = 'HEALTHY';
+  }
+
+  // Redis health: inferred from inventory anomaly score
+  const invInfo  = anomaly_scores['inventory'] || {};
+  const redisFail = invInfo.is_anomaly && (invInfo.severity === 'CRITICAL');
+  const redisEl    = document.getElementById('db-redis');
+  const redisBadge = document.getElementById('redis-badge');
+  if (redisFail) {
+    redisEl.className    = 'db-chip fail';
+    redisBadge.className = 'db-chip-badge fail';
+    redisBadge.textContent = 'CACHE MISS';
+    document.getElementById('redis-meta').textContent = 'ERR: Connection refused — inventory degraded';
+  } else {
+    redisEl.className    = 'db-chip ok';
+    redisBadge.className = 'db-chip-badge ok';
+    redisBadge.textContent = 'HEALTHY';
+    document.getElementById('redis-meta').textContent = 'stock cache · TTL 30s · allkeys-lru';
+  }
+
+  // Live stats
+  if (metrics_raw) {
+    const payM = metrics_raw['payment']   || {};
+    const invM = metrics_raw['inventory'] || {};
+    // PG query latency from payment service (approximate)
+    const pgMs = payM.latency_ms ? `${payM.latency_ms.toFixed(0)}ms` : '–ms';
+    document.getElementById('pg-query-ms').textContent = pgMs;
+    // Cache hit rate (shown if inventory is reporting)
+    const cacheEl = document.getElementById('cache-hit-rate');
+    cacheEl.textContent = redisFail ? '0%' : '~85%';
+    // DB errors
+    document.getElementById('db-err-count').textContent =
+      pgFailing ? '🔴 active' : '0';
+  }
+}
+
+// ── Control functions ─────────────────────────────────────────────────────
+async function injectFailure() {
+  const service = document.getElementById('inject-service').value;
+  const type    = document.getElementById('inject-type').value;
+  try {
+    const r = await fetch(`${ORCHESTRATOR}/inject`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ service, type })
+    });
+    const d = await r.json();
+    console.log('[Inject]', d);
+    showToast(`💥 Injected ${type} → ${service}`);
+  } catch(e) {
+    showToast('❌ Cannot reach orchestrator. Is it running?', true);
+  }
+}
+
+async function healAll() {
+  try {
+    await fetch(`${ORCHESTRATOR}/heal`, { method:'POST',
+      headers:{'Content-Type':'application/json'}, body:'{}' });
+    showToast('✅ All services healed');
+  } catch(e) { showToast('❌ Heal failed', true); }
+}
+
+async function resetAll() {
+  try {
+    await fetch(`${ORCHESTRATOR}/reset`, { method:'POST' });
+    showToast('↺ System reset');
+  } catch(e) { showToast('❌ Reset failed', true); }
+}
+
+// ── Toast ─────────────────────────────────────────────────────────────────
+function showToast(msg, isErr = false) {
+  const t = document.createElement('div');
+  t.style.cssText = `position:fixed;bottom:24px;right:24px;z-index:9999;
+    padding:12px 20px;border-radius:10px;font-size:13px;font-weight:500;
+    background:${isErr ? '#ef4444' : '#10b981'};color:white;
+    box-shadow:0 8px 24px rgba(0,0,0,0.4);
+    animation:fadeIn 0.3s ease;`;
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 3000);
+}
+
+// ── Boot ──────────────────────────────────────────────────────────────────
+connectSocket();
+
+// Fallback: poll /status if socket not available
+setInterval(async () => {
+  try {
+    const r = await fetch(`${ORCHESTRATOR}/status`, { signal: AbortSignal.timeout(2000) });
+    if (r.ok) {
+      const data = await r.json();
+      if (data.ts) updateDashboard(data);
+    }
+  } catch(e) {}
+}, 6000);
+</script>
+</body>
+</html>

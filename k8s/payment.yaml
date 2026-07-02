@@ -1,0 +1,74 @@
+---
+# payment Deployment + Service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payment
+  labels: { app: payment }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: payment }
+  template:
+    metadata:
+      labels: { app: payment }
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port:   "8000"
+    spec:
+      containers:
+        - name: payment
+          image: astrasre/payment:latest
+          command: ["python", "services/payment.py"]
+          ports:
+            - containerPort: 5002
+              name: app
+            - containerPort: 8000
+              name: metrics
+          env:
+            - name: LOKI_URL
+              value: http://loki:3100
+            - name: OTLP_ENDPOINT
+              value: http://jaeger:4318/v1/traces
+            - name: PAYMENT_URL
+              value: http://payment:5002
+          livenessProbe:
+            httpGet: { path: /health, port: 5002 }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          readinessProbe:
+            httpGet: { path: /health, port: 5002 }
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits:   { cpu: 200m, memory: 256Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: payment
+spec:
+  selector: { app: payment }
+  ports:
+    - name: app;     port: 5002
+    - name: metrics; port: 8000
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: payment-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: payment
+  minReplicas: 1
+  maxReplicas: 5
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
