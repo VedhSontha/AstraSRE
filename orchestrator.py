@@ -103,6 +103,16 @@ orchestrator_state = {        # mutable ref so /reset can clear it
 # ── Loki log fetcher ─────────────────────────────────────────────────────
 
 def fetch_loki_logs(service: str = "", limit: int = 30) -> list[str]:
+    """Fetches recent log entries from Loki for the specified microservice.
+
+    Args:
+        service: The microservice label (e.g. 'payment'). If empty, logs from all
+                 monitored services are fetched.
+        limit: The maximum number of log lines to retrieve.
+
+    Returns:
+        A list of raw log messages.
+    """
     try:
         query = f'{{service="{service}"}}' if service else '{service=~".+"}'
         r = http.get(
@@ -128,7 +138,13 @@ def fetch_loki_logs(service: str = "", limit: int = 30) -> list[str]:
 
 # ── Main detection loop ───────────────────────────────────────────────────
 
-def detection_loop():
+def detection_loop() -> None:
+    """Main background loop executing SRE checks.
+
+    Continuously scrapes metrics from Prometheus, feeds them to the Isolation
+    Forest anomaly detector, performs topological root-cause analysis on breaches,
+    triggers autonomous healing, generates incident reports, and sends alerts.
+    """
     print("[Orchestrator] Training Isolation Forest...", flush=True)
     detector.train()
     print("[Orchestrator] Detection loop started.", flush=True)
