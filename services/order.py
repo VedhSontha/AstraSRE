@@ -8,7 +8,11 @@ from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-import threading, time, random, json, os
+import threading
+import time
+import random
+import json
+import os
 import requests as http
 
 try:
