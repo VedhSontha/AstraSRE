@@ -66,7 +66,16 @@ def find_root_cause(anomaly_scores: dict) -> dict | None:
 
 
 def get_blast_radius(service: str) -> list[str]:
-    """All services that would be impacted if `service` fails."""
+    """Finds all downstream services affected by the failure of the specified service.
+
+    Uses Breadth-First Search (BFS) to traverse the dependency graph.
+
+    Args:
+        service: The root service identifier that failed.
+
+    Returns:
+        A list of impacted service names.
+    """
     affected = []
     queue = [service]
     visited: set[str] = set()
@@ -82,6 +91,6 @@ def get_blast_radius(service: str) -> list[str]:
     return list(set(affected))
 
 
-def explain_graph() -> dict:
-    """Return the full dependency graph for the dashboard."""
+def explain_graph() -> dict[str, list[str]]:
+    """Returns the full static dependency graph for dashboard visualization."""
     return DEPENDENCY_GRAPH
