@@ -31,6 +31,11 @@ OLLAMA_URLS  = [
 # ── LLM Backends ────────────────────────────────────────────────────────
 
 def _try_groq(prompt: str) -> str | None:
+    """Attempts to generate the report using the cloud Groq API.
+
+    Returns:
+        The generated string from Groq if successful, else None.
+    """
     if not GROQ_API_KEY:
         return None
     try:
