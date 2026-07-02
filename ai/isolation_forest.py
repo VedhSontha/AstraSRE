@@ -100,6 +100,11 @@ class AnomalyDetector:
         threading.Thread(target=_work, daemon=True).start()
 
     def train(self):
+        """Fits the Isolation Forest model on generated baseline normal telemetry.
+
+        Uses normal telemetry profiles to calculate the raw decision threshold
+        based on mean and standard deviation (1.5-sigma boundary).
+        """
         print(
             "[Detector] Fitting IsolationForest on baseline telemetry matrix"
             " — features: [cpu_pct, latency_ms, error_rate]",
@@ -110,7 +115,7 @@ class AnomalyDetector:
         training_scores = self.model.decision_function(normal_data)
         self.score_min = training_scores.min()
         self.score_max = training_scores.max()
-        # Use 1.5-sigma threshold so we don't over-flag
+        # Use 1.5-sigma threshold to minimize false positives
         self.threshold_raw = (
             training_scores.mean() - 1.5 * training_scores.std()
         )
@@ -123,12 +128,17 @@ class AnomalyDetector:
         )
 
     def _normalize(self, raw_scores):
+        """Scales raw Isolation Forest decision scores between 0 and 1.
+
+        A score of 1 represents maximum anomaly severity, while 0 is fully normal.
+        """
         norm = 1 - (raw_scores - self.score_min) / (
             self.score_max - self.score_min + 1e-8
         )
         return np.clip(norm, 0, 1)
 
     def _get_severity(self, score):
+        """Translates normalized anomaly score into severity categories."""
         if score > 0.82:
             return "CRITICAL"
         elif score > 0.62:
@@ -137,12 +147,16 @@ class AnomalyDetector:
             return "NORMAL"
 
     def predict(self, service_metrics: dict) -> dict:
-        """
-        service_metrics = {
-            "payment":  [cpu, latency, errors],
-            ...
-        }
-        Returns per-service: score, raw_score, is_anomaly, severity, confidence
+        """Evaluates latest metrics to classify active system anomalies.
+
+        Applies rolling window smoothing (SMA) to filter transient noise spikes
+        and computes severity categories.
+
+        Args:
+            service_metrics: Mapping of service names to [cpu%, latency, error_rate] lists.
+
+        Returns:
+            Dictionary containing score, raw_score, is_anomaly, severity, and confidence.
         """
         if not self.trained:
             raise RuntimeError("Call train() first")
