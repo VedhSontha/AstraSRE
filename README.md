@@ -168,6 +168,19 @@ hack_antig/
 
 ---
 
+## 🧪 Running Tests
+
+AstraSRE includes a local unit test suite to validate telemetry processing, Isolation Forest prediction thresholds, and Root Cause Analysis.
+
+Run the test suite using Python:
+```bash
+python -m unittest discover -s tests
+```
+Or using the shortcut:
+```bash
+make test
+```
+
 ## 🏆 Hackathon / Production Feature Grid
 
 - [x] **5-Service Distributed Mesh** with real HTTP communication.
