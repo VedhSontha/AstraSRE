@@ -34,6 +34,7 @@ def log(level, message, **kw):
     entry = json.dumps({"ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                         "service": SERVICE_NAME, "level": level,
                         "message": message, **kw})
+    # Console logger output
     print(entry, flush=True)
     try:
         http.post(f"{LOKI_URL}/loki/api/v1/push",
