@@ -1,5 +1,5 @@
 """
-AstraSRE — Action Engine
+AstraSRE — SRE Remediation Action Engine
 Decides and executes auto-remediation: restart, scale, cache_recovery.
 Now drives REAL Docker container restarts so MTTR is 100% genuine.
 """
