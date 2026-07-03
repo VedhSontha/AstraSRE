@@ -1,122 +1,19 @@
----
-# HPA for all AstraSRE services
-# kubectl apply -f k8s/hpa.yaml
-
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
   name: payment-hpa
-  labels: { app: payment }
+  namespace: astrasre
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
-    name: payment
+    name: payment-service
   minReplicas: 1
   maxReplicas: 5
   metrics:
-    - type: Resource
-      resource:
-        name: cpu
-        target:
-          type: Utilization
-          averageUtilization: 60
-  behavior:
-    scaleUp:
-      stabilizationWindowSeconds: 15
-      policies:
-        - type: Pods; value: 2; periodSeconds: 15
-    scaleDown:
-      stabilizationWindowSeconds: 60
----
-apiVersion: autoscaling/v2
-kind: HorizontalPodAutoscaler
-metadata:
-  name: order-hpa
-  labels: { app: order }
-spec:
-  scaleTargetRef:
-    apiVersion: apps/v1
-    kind: Deployment
-    name: order
-  minReplicas: 1
-  maxReplicas: 4
-  metrics:
-    - type: Resource
-      resource:
-        name: cpu
-        target:
-          type: Utilization
-          averageUtilization: 65
-  behavior:
-    scaleUp:
-      stabilizationWindowSeconds: 20
-      policies:
-        - type: Pods; value: 1; periodSeconds: 20
-    scaleDown:
-      stabilizationWindowSeconds: 90
----
-apiVersion: autoscaling/v2
-kind: HorizontalPodAutoscaler
-metadata:
-  name: inventory-hpa
-  labels: { app: inventory }
-spec:
-  scaleTargetRef:
-    apiVersion: apps/v1
-    kind: Deployment
-    name: inventory
-  minReplicas: 1
-  maxReplicas: 4
-  metrics:
-    - type: Resource
-      resource:
-        name: cpu
-        target:
-          type: Utilization
-          averageUtilization: 65
-  behavior:
-    scaleUp:
-      stabilizationWindowSeconds: 20
-    scaleDown:
-      stabilizationWindowSeconds: 90
----
-apiVersion: autoscaling/v2
-kind: HorizontalPodAutoscaler
-metadata:
-  name: frontend-hpa
-  labels: { app: frontend }
-spec:
-  scaleTargetRef:
-    apiVersion: apps/v1
-    kind: Deployment
-    name: frontend
-  minReplicas: 1
-  maxReplicas: 3
-  metrics:
-    - type: Resource
-      resource:
-        name: cpu
-        target:
-          type: Utilization
-          averageUtilization: 70
----
-apiVersion: autoscaling/v2
-kind: HorizontalPodAutoscaler
-metadata:
-  name: notification-hpa
-  labels: { app: notification }
-spec:
-  scaleTargetRef:
-    apiVersion: apps/v1
-    kind: Deployment
-    name: notification
-  minReplicas: 1
-  maxReplicas: 3
-  metrics:
-    - type: Resource
-      resource:
-        name: cpu
-        target:
-          type: Utilization
-          averageUtilization: 70
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 75
