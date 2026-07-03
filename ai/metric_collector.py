@@ -15,7 +15,7 @@ def _query(metric: str, service: str) -> float:
         r = requests.get(
             f"{PROMETHEUS_URL}/api/v1/query",
             params={"query": f'{metric}{{service="{service}"}}'},
-            timeout=3,
+            timeout=4.0,
         )
         result = r.json()["data"]["result"]
         return float(result[0]["value"][1]) if result else 0.0
