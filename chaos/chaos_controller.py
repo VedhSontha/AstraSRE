@@ -1,5 +1,5 @@
 """
-AstraSRE — Chaos Controller
+AstraSRE — Chaos Controller Module
 Injects failures into services via their /state endpoint.
 Supports: latency, db_timeout, crash, network_partition (simulated)
 """
