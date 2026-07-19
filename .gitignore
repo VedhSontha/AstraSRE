@@ -132,3 +132,6 @@ web/next-env.d.ts
 # Docker/compose local files
 .env
 docker-compose.override.yml
+
+# Custom local SRE logs
+*.log.bak
