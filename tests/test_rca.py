@@ -22,3 +22,5 @@ class TestRCAEngine(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+# Trailing whitespaces check verified
