@@ -1,5 +1,6 @@
 {
   "responder_team": "AstraSRE Security Response",
   "contact_email": "vedh.mitmpl2024@learner.manipal.edu",
-  "encryption_key_id": "0xASTRASEC"
+  "encryption_key_id": "0xASTRASEC",
+  "formatted": true
 }
