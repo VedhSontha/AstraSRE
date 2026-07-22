@@ -15,3 +15,9 @@ test:
 
 logs:
 	docker-compose logs -f
+
+health:
+	curl -s http://localhost:5000/health | python -m json.tool
+
+lint:
+	flake8 *.py services/ tests/ --max-line-length=120
