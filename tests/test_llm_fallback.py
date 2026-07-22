@@ -14,3 +14,5 @@ class TestLLMFallback(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+# Edge case: validates graceful fallback when LLM endpoint is unreachable
