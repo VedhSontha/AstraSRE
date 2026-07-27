@@ -21,3 +21,6 @@ health:
 
 lint:
 	flake8 *.py services/ tests/ --max-line-length=120
+
+status:
+	docker-compose ps
